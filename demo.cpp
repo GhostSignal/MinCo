@@ -15,15 +15,25 @@ static const WSADATA* const __wsa_data__ = []() {
     return &__wsa_data__;
 }();
 
-static const HANDLE __iocp__ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+static const HANDLE __iocp__ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
 
-void MinCo::BaseEventLoop::io_handle()
+void MinCo::BaseEventLoop::__event_handle(time_point nxt)
 {
-    DWORD recvd;
-    size_t comp_key;
-    OVERLAPPED* ovl = NULL;
-    while (GetQueuedCompletionStatus(__iocp__, &recvd, &comp_key, &ovl, 0)) {
-        (*(std::coroutine_handle<>*)++ovl).resume();
+    union {
+        struct {
+            DWORD delay;
+            DWORD trans;
+        };
+        size_t ComKey;
+    };
+    LPOVERLAPPED lpOV;
+    delay = std::min(nxt - now(), time_point::duration::zero()) / 1ms;
+    while (GetQueuedCompletionStatus(__iocp__, &trans, &ComKey, &lpOV, delay)) {
+        (*(std::coroutine_handle<>*)++lpOV).resume();
+    }
+    int err = WSAGetLastError();
+    if (err != WSA_WAIT_TIMEOUT) {
+        throw std::runtime_error("GetQueuedCompletionStatus() error: " + std::to_string(err));
     }
 }
 
@@ -33,7 +43,7 @@ struct CoSock {
     CoSock(HANDLE iocp, int family = AF_INET, int type = SOCK_STREAM, int proro = IPPROTO_TCP)
     {
         _sock = WSASocket(family, type, proro, 0, 0, WSA_FLAG_OVERLAPPED);
-        if (!CreateIoCompletionPort((HANDLE)_sock, iocp, (size_t)this, 0)) {
+        if (!CreateIoCompletionPort((HANDLE)_sock, iocp, 0, 0)) {
             throw std::runtime_error("CreateIoCompletionPort() error: " + std::to_string(WSAGetLastError()));
         }
     }
